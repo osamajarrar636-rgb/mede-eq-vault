@@ -335,18 +335,18 @@ insert into storage.buckets(id,name,public) values
 ('manuals','manuals',false),('photos','photos',false),('videos','videos',false),('schematics','schematics',false),('documents','documents',false),('avatars','avatars',false)
 on conflict (id) do nothing;
 create policy storage_authenticated_read on storage.objects for select to authenticated using (
-  (bucket_id='avatars' and (owner_id=auth.uid() or public.is_admin()))
+  (bucket_id='avatars' and (owner_id=auth.uid()::text or public.is_admin()))
   or public.is_admin()
   or (bucket_id in ('manuals','photos','videos','schematics','documents') and exists (
     select 1 from public.equipment e
-    where e.id::text = (storage.foldername(name))[1] and e.approval_status='APPROVED'
+    where e.id = (storage.foldername(name))[1]::uuid and e.approval_status='APPROVED'
   ))
-  or (bucket_id in ('manuals','photos','videos','schematics','documents') and owner_id=auth.uid())
+  or (bucket_id in ('manuals','photos','videos','schematics','documents') and owner_id=auth.uid()::text)
 );
 create policy storage_authenticated_upload on storage.objects for insert to authenticated with check (
-  bucket_id in ('manuals','photos','videos','schematics','documents','avatars') and owner_id=auth.uid()
+  bucket_id in ('manuals','photos','videos','schematics','documents','avatars') and owner_id=auth.uid()::text
 );
-create policy storage_owner_delete on storage.objects for delete to authenticated using (owner_id=auth.uid() or public.is_admin());
+create policy storage_owner_delete on storage.objects for delete to authenticated using (owner_id=auth.uid()::text or public.is_admin());
 
 -- Admin-only approval RPC. It changes the approved state server-side, not through client-controlled UI checks.
 create or replace function public.review_submission(p_submission_id uuid, p_decision public.content_status, p_note text default null)
