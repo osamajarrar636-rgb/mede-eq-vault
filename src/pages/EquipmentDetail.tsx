@@ -13,12 +13,12 @@ import {
   ShieldCheck,
   Plus,
   X,
-  Upload,
   Wrench,
   BookOpen,
   FileCog,
   AlertTriangle,
   Settings,
+  Trash2,
 } from 'lucide-react';
 
 import {
@@ -33,16 +33,8 @@ import {
 } from '../lib/ui';
 
 import {
-  signedUrl,
-} from '../services/db';
-
-import {
   useAuth,
 } from '../hooks/useAuth';
-
-import type {
-  SubmissionType,
-} from '../types';
 
 /* =========================================================
    TYPES
@@ -61,6 +53,45 @@ type ContentType =
   | 'SCHEMATIC';
 
 /* =========================================================
+   HELPER COMPONENTS
+========================================================= */
+
+function AuthorBadge({ profile }: { profile?: { id: string; full_name: string } | null }) {
+  if (!profile?.full_name) return null;
+  return (
+    <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+      <span>Added by:</span>
+      <Link
+        to={`/profile/${profile.id}`}
+        className="font-medium text-blue-600 hover:text-blue-800 hover:underline transition-colors"
+      >
+        Eng. {profile.full_name}
+      </Link>
+    </div>
+  );
+}
+
+function Info({ label, value }: { label: string; value?: string | number | null }) {
+  if (!value) return null;
+  return (
+    <div className="rounded-lg border bg-white p-4">
+      <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+        {label}
+      </div>
+      <div className="mt-1 text-sm font-medium text-slate-800">{value}</div>
+    </div>
+  );
+}
+
+function LocalEmptyState({ text }: { text: string }) {
+  return (
+    <div className="rounded-xl border border-dashed p-8 text-center text-slate-500 bg-slate-50/50">
+      {text}
+    </div>
+  );
+}
+
+/* =========================================================
    MAIN COMPONENT
 ========================================================= */
 
@@ -72,262 +103,159 @@ export default function EquipmentDetail() {
     profile,
   } = useAuth();
 
-  const [equipment, setEquipment] =
-    useState<any>(null);
+  const [equipment, setEquipment] = useState<any>(null);
+  const [identifiers, setIdentifiers] = useState<any[]>([]);
+  const [repairs, setRepairs] = useState<any[]>([]);
+  const [manuals, setManuals] = useState<any[]>([]);
+  const [parts, setParts] = useState<any[]>([]);
+  const [media, setMedia] = useState<any[]>([]);
 
-  const [identifiers, setIdentifiers] =
-    useState<any[]>([]);
+  const [tab, setTab] = useState('Overview');
+  const [error, setError] = useState('');
+  const [repairSearch, setRepairSearch] = useState('');
 
-  const [repairs, setRepairs] =
-    useState<any[]>([]);
+  const [showAddContent, setShowAddContent] = useState(false);
+  const [contentType, setContentType] = useState<ContentType | null>(null);
 
-  const [manuals, setManuals] =
-    useState<any[]>([]);
-
-  const [parts, setParts] =
-    useState<any[]>([]);
-
-  const [media, setMedia] =
-    useState<any[]>([]);
-
-  const [tab, setTab] =
-    useState('Overview');
-
-  const [error, setError] =
-    useState('');
-
-  const [
-    repairSearch,
-    setRepairSearch,
-  ] = useState('');
-
-  const [
-    showAddContent,
-    setShowAddContent,
-  ] = useState(false);
-
-  const [
-    contentType,
-    setContentType,
-  ] =
-    useState<ContentType | null>(
-      null
-    );
-
-  const canAdd =
-    profile?.role !== 'VIEWER';
+  const canAdd = profile?.role !== 'VIEWER';
+  const isAdmin = profile?.role === 'ADMIN';
 
   /* =======================================================
      LOAD EQUIPMENT
   ======================================================= */
 
-  const loadEquipment =
-    async () => {
-      if (!id) return;
+  const loadEquipment = async () => {
+    if (!id) return;
 
-      try {
-        setError('');
+    try {
+      setError('');
 
-        const [
-          equipmentResult,
-          identifiersResult,
-          repairsResult,
-          manualsResult,
-          partsResult,
-          mediaResult,
-        ] = await Promise.all([
-          supabase
-            .from('equipment')
-            .select('*')
-            .eq('id', id)
-            .single(),
+      const [
+        equipmentResult,
+        identifiersResult,
+        repairsResult,
+        manualsResult,
+        partsResult,
+        mediaResult,
+      ] = await Promise.all([
+        supabase
+          .from('equipment')
+          .select('*')
+          .eq('id', id)
+          .single(),
 
-          supabase
-            .from(
-              'equipment_identifiers'
-            )
-            .select('*')
-            .eq(
-              'equipment_id',
-              id
-            )
-            .order(
-              'created_at',
-              {
-                ascending: true,
-              }
-            ),
+        supabase
+          .from('equipment_identifiers')
+          .select('*, profiles:created_by(id, full_name)')
+          .eq('equipment_id', id)
+          .order('created_at', { ascending: true }),
 
-          supabase
-            .from('repair_cases')
-            .select('*')
-            .eq(
-              'equipment_id',
-              id
-            )
-            .eq(
-              'approval_status',
-              'APPROVED'
-            )
-            .order(
-              'created_at',
-              {
-                ascending: false,
-              }
-            ),
+        supabase
+          .from('repair_cases')
+          .select('*, profiles:created_by(id, full_name)')
+          .eq('equipment_id', id)
+          .eq('approval_status', 'APPROVED')
+          .order('created_at', { ascending: false }),
 
-          supabase
-            .from('manuals')
-            .select('*')
-            .eq(
-              'equipment_id',
-              id
-            )
-            .eq(
-              'approval_status',
-              'APPROVED'
-            )
-            .order(
-              'created_at',
-              {
-                ascending: false,
-              }
-            ),
+        supabase
+          .from('manuals')
+          .select('*, profiles:created_by(id, full_name)')
+          .eq('equipment_id', id)
+          .eq('approval_status', 'APPROVED')
+          .order('created_at', { ascending: false }),
 
-          supabase
-            .from('spare_parts')
-            .select('*')
-            .eq(
-              'equipment_id',
-              id
-            )
-            .eq(
-              'approval_status',
-              'APPROVED'
-            )
-            .order(
-              'created_at',
-              {
-                ascending: false,
-              }
-            ),
+        supabase
+          .from('spare_parts')
+          .select('*, profiles:created_by(id, full_name)')
+          .eq('equipment_id', id)
+          .eq('approval_status', 'APPROVED')
+          .order('created_at', { ascending: false }),
 
-          supabase
-            .from('media')
-            .select('*')
-            .eq(
-              'equipment_id',
-              id
-            )
-            .eq(
-              'approval_status',
-              'APPROVED'
-            )
-            .order(
-              'created_at',
-              {
-                ascending: false,
-              }
-            ),
-        ]);
+        supabase
+          .from('media')
+          .select('*, profiles:created_by(id, full_name)')
+          .eq('equipment_id', id)
+          .eq('approval_status', 'APPROVED')
+          .order('created_at', { ascending: false }),
+      ]);
 
-        if (
-          equipmentResult.error
-        ) {
-          throw equipmentResult.error;
-        }
+      if (equipmentResult.error) throw equipmentResult.error;
+      if (identifiersResult.error) throw identifiersResult.error;
+      if (repairsResult.error) throw repairsResult.error;
+      if (manualsResult.error) throw manualsResult.error;
+      if (partsResult.error) throw partsResult.error;
+      if (mediaResult.error) throw mediaResult.error;
 
-        setEquipment(
-          equipmentResult.data
-        );
-
-        setIdentifiers(
-          identifiersResult.data ||
-            []
-        );
-
-        setRepairs(
-          repairsResult.data ||
-            []
-        );
-
-        setManuals(
-          manualsResult.data ||
-            []
-        );
-
-        setParts(
-          partsResult.data ||
-            []
-        );
-
-        setMedia(
-          mediaResult.data ||
-            []
-        );
-      } catch (
-        error: any
-      ) {
-        setError(
-          error?.message ||
-            'Unable to load equipment information.'
-        );
-      }
-    };
+      setEquipment(equipmentResult.data);
+      setIdentifiers(identifiersResult.data || []);
+      setRepairs(repairsResult.data || []);
+      setManuals(manualsResult.data || []);
+      setParts(partsResult.data || []);
+      setMedia(mediaResult.data || []);
+    } catch (error: any) {
+      setError(error?.message || 'Unable to load equipment information.');
+    }
+  };
 
   useEffect(() => {
     loadEquipment();
   }, [id]);
 
   /* =======================================================
+     DELETE ITEM
+  ======================================================= */
+
+  const deleteItem = async (table: string, itemId: string, itemName: string) => {
+    if (!isAdmin) return;
+
+    const confirmed = window.confirm(
+      `Are you sure you want to delete "${itemName}"? This action cannot be undone.`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setError('');
+      const { error } = await supabase.from(table).delete().eq('id', itemId);
+      if (error) throw error;
+      await loadEquipment();
+    } catch (error: any) {
+      console.error(error);
+      setError(error?.message || 'Unable to delete this item.');
+    }
+  };
+
+  /* =======================================================
      FILTER REPAIRS
   ======================================================= */
 
-  const filteredRepairs =
-    useMemo(() => {
-      const query =
-        repairSearch
-          .trim()
-          .toLowerCase();
+  const filteredRepairs = useMemo(() => {
+    const query = repairSearch.trim().toLowerCase();
+    if (!query) return repairs;
 
-      if (!query) {
-        return repairs;
-      }
+    return repairs.filter((repair) => {
+      const text = [
+        repair.problem_title,
+        repair.reported_fault,
+        repair.symptoms,
+        repair.initial_inspection,
+        repair.measurements,
+        repair.diagnosis,
+        repair.root_cause,
+        repair.corrective_action,
+        repair.parts_replaced,
+        repair.tools_used,
+        repair.testing_procedure,
+        repair.final_result,
+        repair.recommendations,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
 
-      return repairs.filter(
-        (repair) => {
-          const text = [
-            repair.problem_title,
-            repair.reported_fault,
-            repair.symptoms,
-            repair.initial_inspection,
-            repair.measurements,
-            repair.diagnosis,
-            repair.root_cause,
-            repair.corrective_action,
-            repair.parts_replaced,
-            repair.tools_used,
-            repair.testing_procedure,
-            repair.final_result,
-            repair.recommendations,
-          ]
-            .filter(Boolean)
-            .join(' ')
-            .toLowerCase();
-
-          return text.includes(
-            query
-          );
-        }
-      );
-    }, [
-      repairs,
-      repairSearch,
-    ]);
-
-  /* =======================================================
-     ERROR
-  ======================================================= */
+      return text.includes(query);
+    });
+  }, [repairs, repairSearch]);
 
   if (error) {
     return (
@@ -339,7 +267,6 @@ export default function EquipmentDetail() {
           <ArrowLeft size={16} />
           Equipment Library
         </Link>
-
         <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-red-700">
           {error}
         </div>
@@ -347,16 +274,8 @@ export default function EquipmentDetail() {
     );
   }
 
-  /* =======================================================
-     LOADING
-  ======================================================= */
-
   if (!equipment) {
-    return (
-      <div className="p-6 text-slate-500">
-        Loading equipment dossier…
-      </div>
-    );
+    return <div className="p-6 text-slate-500">Loading equipment dossier…</div>;
   }
 
   const tabs = [
@@ -374,15 +293,9 @@ export default function EquipmentDetail() {
     'Revision History',
   ];
 
-  /* =======================================================
-     RENDER
-  ======================================================= */
-
   return (
     <>
       <div className="space-y-6">
-        {/* HEADER */}
-
         <div className="flex items-start justify-between gap-4">
           <div>
             <Link
@@ -393,21 +306,12 @@ export default function EquipmentDetail() {
               Equipment Library
             </Link>
 
-            <div className="text-sm text-slate-500">
-              {equipment.category}
-            </div>
-
+            <div className="text-sm text-slate-500">{equipment.category}</div>
             <h1 className="text-2xl font-bold">
-              {equipment.manufacturer}{' '}
-              {equipment.device_name}
+              {equipment.manufacturer} {equipment.device_name}
             </h1>
-
             <div className="text-slate-500">
-              {equipment.model}
-              {' • '}
-              SN{' '}
-              {equipment.serial_number ||
-                'Not specified'}
+              {equipment.model} • SN {equipment.serial_number || 'Not specified'}
             </div>
           </div>
 
@@ -415,11 +319,7 @@ export default function EquipmentDetail() {
             <button
               type="button"
               className="primary inline-flex items-center gap-2 shrink-0"
-              onClick={() =>
-                setShowAddContent(
-                  true
-                )
-              }
+              onClick={() => setShowAddContent(true)}
             >
               <Plus size={18} />
               Add Content
@@ -427,29 +327,15 @@ export default function EquipmentDetail() {
           )}
         </div>
 
-        {/* TABS */}
-
         <div className="flex flex-wrap gap-2 border-b pb-3">
           {tabs.map((item) => (
             <button
               key={item}
               type="button"
-              className={
-                tab === item
-                  ? 'active'
-                  : ''
-              }
+              className={tab === item ? 'active font-semibold text-blue-600 border-b-2 border-blue-600 pb-1' : 'text-slate-600 hover:text-slate-900 pb-1'}
               onClick={() => {
                 setTab(item);
-
-                if (
-                  item !==
-                  'Repair Cases'
-                ) {
-                  setRepairSearch(
-                    ''
-                  );
-                }
+                if (item !== 'Repair Cases') setRepairSearch('');
               }}
             >
               {item}
@@ -457,156 +343,79 @@ export default function EquipmentDetail() {
           ))}
         </div>
 
-        {/* OVERVIEW */}
-
         {tab === 'Overview' && (
           <section className="space-y-6">
-            <h2 className="text-xl font-semibold">
-              Engineering overview
-            </h2>
-
+            <h2 className="text-xl font-semibold">Engineering overview</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Info
-                label="Manufacturer"
-                value={
-                  equipment.manufacturer
-                }
-              />
-
-              <Info
-                label="Device"
-                value={
-                  equipment.device_name
-                }
-              />
-
-              <Info
-                label="Model"
-                value={
-                  equipment.model
-                }
-              />
-
-              <Info
-                label="Serial Number"
-                value={
-                  equipment.serial_number
-                }
-              />
-
-              <Info
-                label="Year"
-                value={
-                  equipment.year
-                }
-              />
-
-              <Info
-                label="Country"
-                value={
-                  equipment.country
-                }
-              />
-
-              <Info
-                label="Status"
-                value={
-                  equipment.status
-                }
-              />
+              <Info label="Manufacturer" value={equipment.manufacturer} />
+              <Info label="Device" value={equipment.device_name} />
+              <Info label="Model" value={equipment.model} />
+              <Info label="Serial Number" value={equipment.serial_number} />
+              <Info label="Year" value={equipment.year} />
+              <Info label="Country" value={equipment.country} />
+              <Info label="Status" value={equipment.status} />
             </div>
 
-            <Info
-              label="Description"
-              value={
-                equipment.description
-              }
-            />
-
-            <Info
-              label="Clinical application"
-              value={
-                equipment.clinical_application
-              }
-            />
-
-            <Info
-              label="Operating principle"
-              value={
-                equipment.operating_principle
-              }
-            />
+            <Info label="Description" value={equipment.description} />
+            <Info label="Clinical application" value={equipment.clinical_application} />
+            <Info label="Operating principle" value={equipment.operating_principle} />
 
             <div>
-              <h3 className="font-semibold mb-3">
-                Technical identifiers
-              </h3>
-
-              {identifiers.length >
-              0 ? (
+              <h3 className="font-semibold mb-3">Technical identifiers</h3>
+              {identifiers.length > 0 ? (
                 <div className="space-y-2">
-                  {identifiers.map(
-                    (item) => (
-                      <div
-                        key={
-                          item.id
-                        }
-                        className="rounded-lg border p-3"
-                      >
-                        <div className="font-medium">
-                          {
-                            item.field_name
-                          }
+                  {identifiers.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-lg border p-3 bg-white flex flex-col justify-between"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-medium">{item.field_name}</div>
+                          <div className="text-slate-600 text-sm mt-0.5">
+                            {item.field_value || 'Not specified'}
+                            {item.unit ? ` ${item.unit}` : ''}
+                          </div>
                         </div>
-
-                        <div className="text-slate-600">
-                          {item.field_value ||
-                            'Not specified'}
-
-                          {item.unit
-                            ? ` ${item.unit}`
-                            : ''}
-                        </div>
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            className="text-slate-400 hover:text-red-600"
+                            onClick={() =>
+                              deleteItem(
+                                'equipment_identifiers',
+                                item.id,
+                                item.field_name
+                              )
+                            }
+                          >
+                            <Trash2 size={17} />
+                          </button>
+                        )}
                       </div>
-                    )
-                  )}
+                      <AuthorBadge profile={item.profiles} />
+                    </div>
+                  ))}
                 </div>
               ) : (
-                <div className="text-slate-500">
-                  No additional specifications
-                  recorded.
-                </div>
+                <div className="text-slate-500">No additional specifications recorded.</div>
               )}
             </div>
           </section>
         )}
 
-        {/* TECHNICAL SPECIFICATIONS */}
-
-        {tab ===
-          'Technical Specifications' && (
+        {tab === 'Technical Specifications' && (
           <section>
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h2 className="text-xl font-semibold">
-                  Technical specifications
-                </h2>
-
-                <p className="text-sm text-slate-500">
-                  Engineering parameters
-                  and specifications.
-                </p>
+                <h2 className="text-xl font-semibold">Technical specifications</h2>
+                <p className="text-sm text-slate-500">Engineering parameters and specifications.</p>
               </div>
-
               {canAdd && (
                 <button
                   type="button"
                   className="secondary inline-flex items-center gap-2"
-                  onClick={() =>
-                    setContentType(
-                      'TECHNICAL_SPECIFICATION'
-                    )
-                  }
+                  onClick={() => setContentType('TECHNICAL_SPECIFICATION')}
                 >
                   <Plus size={16} />
                   Add Specification
@@ -614,59 +423,46 @@ export default function EquipmentDetail() {
               )}
             </div>
 
-            {identifiers.length >
-            0 ? (
+            {identifiers.length > 0 ? (
               <div className="space-y-2">
-                {identifiers.map(
-                  (item) => (
-                    <div
-                      key={
-                        item.id
-                      }
-                      className="rounded-lg border p-4 bg-white"
-                    >
-                      <div className="font-medium">
-                        {
-                          item.field_name
-                        }
+                {identifiers.map((item) => (
+                  <div key={item.id} className="rounded-lg border p-4 bg-white flex flex-col justify-between">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="font-medium">{item.field_name}</div>
+                        <div className="text-slate-600 text-sm mt-1">
+                          {item.field_value || 'Not specified'}
+                          {item.unit ? ` ${item.unit}` : ''}
+                        </div>
                       </div>
-
-                      <div className="text-slate-600 mt-1">
-                        {item.field_value ||
-                          'Not specified'}
-
-                        {item.unit
-                          ? ` ${item.unit}`
-                          : ''}
-                      </div>
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          className="text-slate-400 hover:text-red-600"
+                          onClick={() =>
+                            deleteItem('equipment_identifiers', item.id, item.field_name)
+                          }
+                        >
+                          <Trash2 size={17} />
+                        </button>
+                      )}
                     </div>
-                  )
-                )}
+                    <AuthorBadge profile={item.profiles} />
+                  </div>
+                ))}
               </div>
             ) : (
-              <EmptyState
-                text="No technical specifications recorded."
-              />
+              <LocalEmptyState text="No technical specifications recorded." />
             )}
           </section>
         )}
 
-        {/* REPAIR CASES */}
-
-        {tab ===
-          'Repair Cases' && (
+        {tab === 'Repair Cases' && (
           <section className="space-y-5">
             <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
               <div>
-                <h2 className="text-xl font-semibold">
-                  Repair cases
-                </h2>
-
-                <p className="text-sm text-slate-500">
-                  Approved service
-                  history for this
-                  device.
-                </p>
+                <h2 className="text-xl font-semibold">Repair cases</h2>
+                <p className="text-sm text-slate-500">Approved service history for this device.</p>
               </div>
 
               <div className="flex gap-2 w-full md:w-auto">
@@ -675,20 +471,10 @@ export default function EquipmentDetail() {
                     size={18}
                     className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
                   />
-
                   <input
                     type="search"
-                    value={
-                      repairSearch
-                    }
-                    onChange={(
-                      event
-                    ) =>
-                      setRepairSearch(
-                        event.target
-                          .value
-                      )
-                    }
+                    value={repairSearch}
+                    onChange={(e) => setRepairSearch(e.target.value)}
                     placeholder="Search problem, fault, diagnosis..."
                     className="w-full rounded-lg border pl-10 pr-3 py-2 outline-none"
                   />
@@ -698,11 +484,7 @@ export default function EquipmentDetail() {
                   <button
                     type="button"
                     className="primary inline-flex items-center gap-2 shrink-0"
-                    onClick={() =>
-                      setContentType(
-                        'REPAIR_CASE'
-                      )
-                    }
+                    onClick={() => setContentType('REPAIR_CASE')}
                   >
                     <Plus size={16} />
                     Add
@@ -713,129 +495,83 @@ export default function EquipmentDetail() {
 
             {repairSearch && (
               <div className="text-sm text-slate-500">
-                Showing{' '}
-                <strong>
-                  {
-                    filteredRepairs.length
-                  }
-                </strong>{' '}
-                of{' '}
-                <strong>
-                  {repairs.length}
-                </strong>{' '}
-                repair cases
+                Showing <strong>{filteredRepairs.length}</strong> of <strong>{repairs.length}</strong> repair cases
               </div>
             )}
 
-            {filteredRepairs.length >
-            0 ? (
+            {filteredRepairs.length > 0 ? (
               <div className="space-y-4">
-                {filteredRepairs.map(
-                  (repair) => {
-                    const attachments =
-                      media.filter(
-                        (item) =>
-                          item.repair_case_id ===
-                            repair.id
-                      );
+                {filteredRepairs.map((repair) => {
+                  const attachments = media.filter((item) => item.repair_case_id === repair.id);
 
-                    return (
-                      <article
-                        key={
-                          repair.id
-                        }
-                        className="rounded-xl border bg-white p-5 shadow-sm"
-                      >
-                        <div className="flex items-start justify-between gap-4">
-                          <div>
-                            <div className="text-sm text-slate-500">
-                              {formatDate(
-                                repair.repair_date ||
-                                  repair.created_at
-                              )}
-                            </div>
-
-                            <Link
-                              to={`/repair-cases/${repair.id}`}
-                              className="text-lg font-semibold mt-1 block hover:underline"
-                            >
-                              {
-                                repair.problem_title
-                              }
-                            </Link>
+                  return (
+                    <article
+                      key={repair.id}
+                      className="rounded-xl border bg-white p-5 shadow-sm space-y-4"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <div className="text-sm text-slate-500">
+                            {formatDate(repair.repair_date || repair.created_at)}
                           </div>
-
-                          <span className="inline-flex items-center gap-1 text-sm font-medium text-green-700">
-                            <ShieldCheck
-                              size={16}
-                            />
-                            Approved
-                          </span>
-                        </div>
-
-                        <div className="mt-5 space-y-4">
-                          <Info
-                            label="Reported fault"
-                            value={
-                              repair.reported_fault
-                            }
-                          />
-
-                          <Info
-                            label="Root cause"
-                            value={
-                              repair.root_cause
-                            }
-                          />
-
-                          <Info
-                            label="Corrective action"
-                            value={
-                              repair.corrective_action
-                            }
-                          />
-
-                          <Info
-                            label="Final result"
-                            value={
-                              repair.final_result
-                            }
-                          />
-                        </div>
-
-                        {attachments.length >
-                          0 && (
-                          <div className="mt-5 rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
-                            📎{' '}
-                            {
-                              attachments.length
-                            }{' '}
-                            approved attachment
-                            {attachments.length !==
-                            1
-                              ? 's'
-                              : ''}{' '}
-                            attached to
-                            this case.
-                          </div>
-                        )}
-
-                        <div className="mt-5 pt-4 border-t">
                           <Link
                             to={`/repair-cases/${repair.id}`}
-                            className="secondary inline-flex"
+                            className="text-lg font-semibold mt-1 block hover:underline text-blue-900"
                           >
-                            Open full repair
-                            case
+                            {repair.problem_title}
                           </Link>
                         </div>
-                      </article>
-                    );
-                  }
-                )}
+
+                        <div className="flex items-center gap-3">
+                          <span className="inline-flex items-center gap-1 text-sm font-medium text-green-700">
+                            <ShieldCheck size={16} />
+                            Approved
+                          </span>
+
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              className="text-slate-400 hover:text-red-600"
+                              onClick={() =>
+                                deleteItem(
+                                  'repair_cases',
+                                  repair.id,
+                                  repair.problem_title || 'this repair case'
+                                )
+                              }
+                            >
+                              <Trash2 size={17} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <Info label="Reported fault" value={repair.reported_fault} />
+                        <Info label="Root cause" value={repair.root_cause} />
+                        <Info label="Corrective action" value={repair.corrective_action} />
+                        <Info label="Final result" value={repair.final_result} />
+                      </div>
+
+                      {attachments.length > 0 && (
+                        <div className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
+                          📎 {attachments.length} approved attachment{attachments.length !== 1 ? 's' : ''} attached to this case.
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-between border-t pt-3">
+                        <Link to={`/repair-cases/${repair.id}`} className="text-xs font-semibold text-blue-600 hover:underline">
+                          Open full repair case →
+                        </Link>
+                      </div>
+
+                      <AuthorBadge profile={repair.profiles} />
+                    </article>
+                  );
+                })}
               </div>
             ) : (
-              <EmptyState
+              <LocalEmptyState
                 text={
                   repairSearch
                     ? 'No repair cases match your search.'
@@ -846,8 +582,6 @@ export default function EquipmentDetail() {
           </section>
         )}
 
-        {/* DOCUMENTS */}
-
         {[
           'User Manual',
           'Service Manual',
@@ -857,127 +591,39 @@ export default function EquipmentDetail() {
         ].includes(tab) && (
           <DocumentTab
             title={tab}
-            docs={manuals.filter(
-              (manual) => {
-                if (
-                  tab ===
-                  'User Manual'
-                ) {
-                  return (
-                    manual.document_type ===
-                    'User Manual'
-                  );
-                }
-
-                if (
-                  tab ===
-                  'Service Manual'
-                ) {
-                  return (
-                    manual.document_type ===
-                    'Service Manual'
-                  );
-                }
-
-                if (
-                  tab ===
-                  'Schematics'
-                ) {
-                  return manual.document_type
-                    ?.toLowerCase()
-                    .includes(
-                      'schematic'
-                    );
-                }
-
-                if (
-                  tab ===
-                  'Troubleshooting'
-                ) {
-                  return (
-                    manual.document_type ===
-                    'Troubleshooting Guide'
-                  );
-                }
-
-                return (
-                  manual.document_type ===
-                    'Document' ||
-                  ![
-                    'User Manual',
-                    'Service Manual',
-                    'Troubleshooting Guide',
-                  ].includes(
-                    manual.document_type
-                  )
-                );
-              }
-            )}
+            docs={manuals.filter((manual) => {
+              if (tab === 'User Manual') return manual.document_type === 'User Manual';
+              if (tab === 'Service Manual') return manual.document_type === 'Service Manual';
+              if (tab === 'Schematics') return manual.document_type?.toLowerCase().includes('schematic');
+              if (tab === 'Troubleshooting') return manual.document_type === 'Troubleshooting Guide';
+              return manual.document_type === 'Document' || !['User Manual', 'Service Manual', 'Troubleshooting Guide'].includes(manual.document_type);
+            })}
             canAdd={canAdd}
+            isAdmin={isAdmin}
             onAdd={() => {
-              if (
-                tab ===
-                'User Manual'
-              ) {
-                setContentType(
-                  'USER_MANUAL'
-                );
-              } else if (
-                tab ===
-                'Service Manual'
-              ) {
-                setContentType(
-                  'SERVICE_MANUAL'
-                );
-              } else if (
-                tab ===
-                'Schematics'
-              ) {
-                setContentType(
-                  'SCHEMATIC'
-                );
-              } else if (
-                tab ===
-                'Troubleshooting'
-              ) {
-                setContentType(
-                  'TROUBLESHOOTING_GUIDE'
-                );
-              } else {
-                setContentType(
-                  'DOCUMENT'
-                );
-              }
+              if (tab === 'User Manual') setContentType('USER_MANUAL');
+              else if (tab === 'Service Manual') setContentType('SERVICE_MANUAL');
+              else if (tab === 'Schematics') setContentType('SCHEMATIC');
+              else if (tab === 'Troubleshooting') setContentType('TROUBLESHOOTING_GUIDE');
+              else setContentType('DOCUMENT');
             }}
+            onDelete={deleteItem}
           />
         )}
 
-        {/* SPARE PARTS */}
-
-        {tab ===
-          'Spare Parts' && (
+        {tab === 'Spare Parts' && (
           <section>
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h2 className="text-xl font-semibold">
-                  Spare parts
-                </h2>
-
-                <p className="text-sm text-slate-500">
-                  Approved replacement
-                  parts.
-                </p>
+                <h2 className="text-xl font-semibold">Spare parts</h2>
+                <p className="text-sm text-slate-500">Approved replacement parts.</p>
               </div>
 
               {canAdd && (
                 <button
                   type="button"
                   className="primary inline-flex items-center gap-2"
-                  onClick={() =>
-                    setContentType(
-                      'SPARE_PART'
-                    )
-                  }
+                  onClick={() => setContentType('SPARE_PART')}
                 >
                   <Plus size={16} />
                   Add Spare Part
@@ -985,136 +631,87 @@ export default function EquipmentDetail() {
               )}
             </div>
 
-            {parts.length >
-            0 ? (
+            {parts.length > 0 ? (
               <div className="space-y-3">
-                {parts.map(
-                  (part) => (
-                    <div
-                      key={
-                        part.id
-                      }
-                      className="rounded-lg border p-4 bg-white"
-                    >
-                      <div className="font-semibold">
-                        {
-                          part.part_name
-                        }
-                      </div>
-
-                      <div className="text-sm text-slate-500">
-                        {part.part_number ||
-                          'Part number not specified'}
-                        {' • '}
-                        {part.compatibility ||
-                          'Compatibility not specified'}
-                      </div>
-
-                      {part.description && (
-                        <div className="text-sm text-slate-600 mt-2">
-                          {
-                            part.description
-                          }
+                {parts.map((part) => (
+                  <div key={part.id} className="rounded-lg border p-4 bg-white flex flex-col justify-between">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="font-semibold">{part.part_name}</div>
+                        <div className="text-sm text-slate-500">
+                          {part.part_number || 'Part number not specified'} • {part.compatibility || 'Compatibility not specified'}
                         </div>
+                        {part.description && (
+                          <div className="text-sm text-slate-600 mt-2">{part.description}</div>
+                        )}
+                      </div>
+
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          className="shrink-0 text-slate-400 hover:text-red-600"
+                          onClick={() => deleteItem('spare_parts', part.id, part.part_name || 'this spare part')}
+                        >
+                          <Trash2 size={17} />
+                        </button>
                       )}
                     </div>
-                  )
-                )}
+                    <AuthorBadge profile={part.profiles} />
+                  </div>
+                ))}
               </div>
             ) : (
-              <EmptyState
-                text="No approved spare parts."
-              />
+              <LocalEmptyState text="No approved spare parts." />
             )}
           </section>
         )}
 
-        {/* PHOTOS */}
-
-        {tab ===
-          'Photos' && (
+        {tab === 'Photos' && (
           <MediaTab
             title="Photos"
-            items={media.filter(
-              (item) =>
-                item.media_type ===
-                'PHOTO'
-            )}
+            items={media.filter((item) => item.media_type === 'PHOTO')}
             canAdd={canAdd}
-            onAdd={() =>
-              setContentType(
-                'PHOTO'
-              )
-            }
+            isAdmin={isAdmin}
+            onAdd={() => setContentType('PHOTO')}
+            onDelete={deleteItem}
           />
         )}
 
-        {/* VIDEOS */}
-
-        {tab ===
-          'Videos' && (
+        {tab === 'Videos' && (
           <MediaTab
             title="Videos"
-            items={media.filter(
-              (item) =>
-                item.media_type ===
-                'VIDEO'
-            )}
+            items={media.filter((item) => item.media_type === 'VIDEO')}
             canAdd={canAdd}
-            onAdd={() =>
-              setContentType(
-                'VIDEO'
-              )
-            }
+            isAdmin={isAdmin}
+            onAdd={() => setContentType('VIDEO')}
+            onDelete={deleteItem}
           />
         )}
 
-        {/* REVISION HISTORY */}
-
-        {tab ===
-          'Revision History' && (
+        {tab === 'Revision History' && (
           <section>
-            <h2 className="text-xl font-semibold mb-3">
-              Revision History
-            </h2>
-
-            <div className="text-slate-500">
-              No revision history is
-              available for this
-              record.
-            </div>
+            <h2 className="text-xl font-semibold mb-3">Revision History</h2>
+            <div className="text-slate-500">No revision history is available for this record.</div>
           </section>
         )}
       </div>
 
-      {/* ADD CONTENT SELECTOR */}
-
       {showAddContent && (
         <AddContentSelector
-          onClose={() =>
-            setShowAddContent(
-              false
-            )
-          }
+          onClose={() => setShowAddContent(false)}
           onSelect={(type) => {
-            setShowAddContent(
-              false
-            );
+            setShowAddContent(false);
             setContentType(type);
           }}
         />
       )}
-
-      {/* ADD CONTENT FORM */}
 
       {contentType && id && (
         <AddContentForm
           equipmentId={id}
           type={contentType}
           userId={user?.id}
-          onClose={() =>
-            setContentType(null)
-          }
+          onClose={() => setContentType(null)}
           onDone={async () => {
             setContentType(null);
             await loadEquipment();
@@ -1126,7 +723,145 @@ export default function EquipmentDetail() {
 }
 
 /* =========================================================
-   ADD CONTENT SELECTOR
+   DOCUMENT TAB COMPONENT
+========================================================= */
+
+function DocumentTab({
+  title,
+  docs,
+  canAdd,
+  isAdmin,
+  onAdd,
+  onDelete,
+}: {
+  title: string;
+  docs: any[];
+  canAdd: boolean;
+  isAdmin: boolean;
+  onAdd: () => void;
+  onDelete: (table: string, id: string, name: string) => void;
+}) {
+  return (
+    <section className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-semibold">{title}</h2>
+          <p className="text-sm text-slate-500">Approved documentation and files.</p>
+        </div>
+        {canAdd && (
+          <button type="button" className="secondary inline-flex items-center gap-2" onClick={onAdd}>
+            <Plus size={16} /> Add {title}
+          </button>
+        )}
+      </div>
+
+      {docs.length > 0 ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {docs.map((doc) => (
+            <div key={doc.id} className="rounded-xl border bg-white p-4 shadow-sm flex flex-col justify-between">
+              <div>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2 text-blue-600 font-semibold">
+                    <FileText size={18} />
+                    <span>{doc.title || doc.document_type}</span>
+                  </div>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      className="text-slate-400 hover:text-red-600"
+                      onClick={() => onDelete('manuals', doc.id, doc.title || title)}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </div>
+                {doc.description && <p className="text-xs text-slate-600 mt-2">{doc.description}</p>}
+              </div>
+              <AuthorBadge profile={doc.profiles} />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <LocalEmptyState text={`No ${title.toLowerCase()} recorded.`} />
+      )}
+    </section>
+  );
+}
+
+/* =========================================================
+   MEDIA TAB COMPONENT
+========================================================= */
+
+function MediaTab({
+  title,
+  items,
+  canAdd,
+  isAdmin,
+  onAdd,
+  onDelete,
+}: {
+  title: string;
+  items: any[];
+  canAdd: boolean;
+  isAdmin: boolean;
+  onAdd: () => void;
+  onDelete: (table: string, id: string, name: string) => void;
+}) {
+  return (
+    <section className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-semibold">{title}</h2>
+          <p className="text-sm text-slate-500">Approved visual media.</p>
+        </div>
+        {canAdd && (
+          <button type="button" className="secondary inline-flex items-center gap-2" onClick={onAdd}>
+            <Plus size={16} /> Add {title === 'Photos' ? 'Photo' : 'Video'}
+          </button>
+        )}
+      </div>
+
+      {items.length > 0 ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+          {items.map((item) => (
+            <div key={item.id} className="rounded-xl border bg-white p-3 shadow-sm flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-slate-500 truncate">{item.title || title}</span>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      className="text-slate-400 hover:text-red-600"
+                      onClick={() => onDelete('media', item.id, item.title || title)}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </div>
+                {item.storage_path && (
+                  <div className="rounded bg-slate-100 aspect-video flex items-center justify-center overflow-hidden mb-2">
+                    {item.media_type === 'PHOTO' ? (
+                      <img src={item.storage_path} alt={item.title} className="w-full h-full object-cover" />
+                    ) : (
+                      <PlayCircle className="text-slate-400" size={32} />
+                    )}
+                  </div>
+                )}
+                {item.caption && <p className="text-xs text-slate-600">{item.caption}</p>}
+              </div>
+              <AuthorBadge profile={item.profiles} />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <LocalEmptyState text={`No ${title.toLowerCase()} uploaded.`} />
+      )}
+    </section>
+  );
+}
+
+/* =========================================================
+   ADD CONTENT SELECTOR COMPONENT
 ========================================================= */
 
 function AddContentSelector({
@@ -1134,9 +869,7 @@ function AddContentSelector({
   onSelect,
 }: {
   onClose: () => void;
-  onSelect: (
-    type: ContentType
-  ) => void;
+  onSelect: (type: ContentType) => void;
 }) {
   const options: {
     type: ContentType;
@@ -1145,151 +878,97 @@ function AddContentSelector({
     icon: any;
   }[] = [
     {
-      type:
-        'TECHNICAL_SPECIFICATION',
-      title:
-        'Technical Specification',
-      description:
-        'Add an engineering parameter or specification.',
+      type: 'TECHNICAL_SPECIFICATION',
+      title: 'Technical Specification',
+      description: 'Add an engineering parameter or specification.',
       icon: Settings,
     },
     {
       type: 'USER_MANUAL',
       title: 'User Manual',
-      description:
-        'Upload a user manual.',
+      description: 'Upload an operator or user manual.',
       icon: BookOpen,
     },
     {
       type: 'SERVICE_MANUAL',
       title: 'Service Manual',
-      description:
-        'Upload a service manual.',
+      description: 'Upload a service or technical manual.',
       icon: FileCog,
     },
     {
       type: 'SPARE_PART',
       title: 'Spare Part',
-      description:
-        'Add a replacement part and compatibility information.',
+      description: 'Add a compatible part or component.',
       icon: Wrench,
     },
     {
       type: 'REPAIR_CASE',
       title: 'Repair Case',
-      description:
-        'Add a new repair/service case.',
-      icon: Wrench,
+      description: 'Document a repair or maintenance case.',
+      icon: AlertTriangle,
     },
     {
-      type:
-        'TROUBLESHOOTING_GUIDE',
-      title:
-        'Troubleshooting Guide',
-      description:
-        'Upload a troubleshooting guide.',
-      icon: AlertTriangle,
+      type: 'TROUBLESHOOTING_GUIDE',
+      title: 'Troubleshooting Guide',
+      description: 'Upload a guide for diagnostic steps.',
+      icon: FileText,
     },
     {
       type: 'PHOTO',
       title: 'Photo',
-      description:
-        'Upload equipment photos.',
+      description: 'Upload an image of the equipment or part.',
       icon: ImageIcon,
     },
     {
       type: 'VIDEO',
       title: 'Video',
-      description:
-        'Upload equipment videos.',
+      description: 'Upload a procedural or demonstration video.',
       icon: PlayCircle,
     },
     {
       type: 'DOCUMENT',
       title: 'Document',
-      description:
-        'Upload technical documents.',
+      description: 'Upload general documentation or reports.',
       icon: FileText,
     },
     {
       type: 'SCHEMATIC',
       title: 'Schematic',
-      description:
-        'Upload electrical/system schematics.',
+      description: 'Upload electrical or mechanical diagrams.',
       icon: FileText,
     },
   ];
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden">
-        <div className="flex items-center justify-between border-b p-5">
-          <div>
-            <h2 className="text-lg font-semibold">
-              Add Content
-            </h2>
-
-            <p className="text-sm text-slate-500 mt-1">
-              Select the type of
-              information you want
-              to add to this
-              equipment.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            className="icon-btn"
-            onClick={onClose}
-          >
-            <X size={19} />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-xl space-y-4 max-h-[85vh] overflow-y-auto">
+        <div className="flex items-center justify-between border-b pb-3">
+          <h3 className="text-lg font-bold">Add Content to Equipment</h3>
+          <button type="button" className="text-slate-400 hover:text-slate-600" onClick={onClose}>
+            <X size={20} />
           </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-5 max-h-[70vh] overflow-y-auto">
-          {options.map(
-            (option) => {
-              const Icon =
-                option.icon;
-
-              return (
-                <button
-                  key={
-                    option.type
-                  }
-                  type="button"
-                  onClick={() =>
-                    onSelect(
-                      option.type
-                    )
-                  }
-                  className="text-left rounded-xl border p-4 hover:border-slate-400 hover:bg-slate-50 transition"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="h-10 w-10 shrink-0 rounded-lg bg-slate-100 flex items-center justify-center">
-                      <Icon
-                        size={19}
-                      />
-                    </div>
-
-                    <div>
-                      <div className="font-semibold text-sm">
-                        {
-                          option.title
-                        }
-                      </div>
-
-                      <div className="text-xs text-slate-500 mt-1 leading-5">
-                        {
-                          option.description
-                        }
-                      </div>
-                    </div>
-                  </div>
-                </button>
-              );
-            }
-          )}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {options.map((opt) => {
+            const Icon = opt.icon;
+            return (
+              <button
+                key={opt.type}
+                type="button"
+                className="flex items-start gap-3 rounded-xl border p-4 text-left transition hover:border-blue-500 hover:bg-blue-50/50"
+                onClick={() => onSelect(opt.type)}
+              >
+                <div className="rounded-lg bg-blue-100 p-2 text-blue-600 shrink-0">
+                  <Icon size={20} />
+                </div>
+                <div>
+                  <div className="font-semibold text-sm text-slate-800">{opt.title}</div>
+                  <div className="text-xs text-slate-500 mt-0.5">{opt.description}</div>
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -1297,7 +976,7 @@ function AddContentSelector({
 }
 
 /* =========================================================
-   ADD CONTENT FORM
+   ADD CONTENT FORM COMPONENT
 ========================================================= */
 
 function AddContentForm({
@@ -1311,1534 +990,293 @@ function AddContentForm({
   type: ContentType;
   userId?: string;
   onClose: () => void;
-  onDone: () => void;
+  onDone: () => Promise<void>;
 }) {
-  const [busy, setBusy] =
-    useState(false);
+  const [loading, setLoading] = useState(false);
+  const [formError, setFormError] = useState('');
 
-  const [error, setError] =
-    useState('');
+  const [fieldName, setFieldName] = useState('');
+  const [fieldValue, setFieldValue] = useState('');
+  const [unit, setUnit] = useState('');
 
-  const [title, setTitle] =
-    useState('');
+  const [partName, setPartName] = useState('');
+  const [partNumber, setPartNumber] = useState('');
+  const [compatibility, setCompatibility] = useState('');
+  const [description, setDescription] = useState('');
 
-  const [
-    description,
-    setDescription,
-  ] = useState('');
+  const [problemTitle, setProblemTitle] = useState('');
+  const [reportedFault, setReportedFault] = useState('');
+  const [rootCause, setRootCause] = useState('');
+  const [correctiveAction, setCorrectiveAction] = useState('');
+  const [finalResult, setFinalResult] = useState('');
 
-  const [
-    fieldName,
-    setFieldName,
-  ] = useState('');
+  const [title, setTitle] = useState('');
 
-  const [
-    fieldValue,
-    setFieldValue,
-  ] = useState('');
-
-  const [unit, setUnit] =
-    useState('');
-
-  const [
-    partNumber,
-    setPartNumber,
-  ] = useState('');
-
-  const [
-    compatibility,
-    setCompatibility,
-  ] = useState('');
-
-  const [
-    problemTitle,
-    setProblemTitle,
-  ] = useState('');
-
-  const [
-    reportedFault,
-    setReportedFault,
-  ] = useState('');
-
-  const [
-    rootCause,
-    setRootCause,
-  ] = useState('');
-
-  const [
-    correctiveAction,
-    setCorrectiveAction,
-  ] = useState('');
-
-  const [
-    finalResult,
-    setFinalResult,
-  ] = useState('');
-
-  const [files, setFiles] =
-    useState<File[]>([]);
-
-  const isFileType = [
-    'USER_MANUAL',
-    'SERVICE_MANUAL',
-    'TROUBLESHOOTING_GUIDE',
-    'PHOTO',
-    'VIDEO',
-    'DOCUMENT',
-    'SCHEMATIC',
-  ].includes(type);
-
-  const typeTitle: Record<
-    ContentType,
-    string
-  > = {
-    TECHNICAL_SPECIFICATION:
-      'Technical Specification',
-    USER_MANUAL:
-      'User Manual',
-    SERVICE_MANUAL:
-      'Service Manual',
-    SPARE_PART:
-      'Spare Part',
-    REPAIR_CASE:
-      'Repair Case',
-    TROUBLESHOOTING_GUIDE:
-      'Troubleshooting Guide',
-    PHOTO: 'Photos',
-    VIDEO: 'Videos',
-    DOCUMENT:
-      'Document',
-    SCHEMATIC:
-      'Schematic',
-  };
-
-  /* =======================================================
-     SUBMIT
-  ======================================================= */
-
-  const submit = async (
-    event: React.FormEvent
-  ) => {
-    event.preventDefault();
-
-    if (!userId) {
-      setError(
-        'You must be logged in to add content.'
-      );
-      return;
-    }
-
-    setBusy(true);
-    setError('');
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setFormError('');
 
     try {
-      /* =================================================
-         TECHNICAL SPECIFICATION
-      ================================================= */
-
-      if (
-        type ===
-        'TECHNICAL_SPECIFICATION'
-      ) {
-        if (
-          !fieldName.trim() ||
-          !fieldValue.trim()
-        ) {
-          throw new Error(
-            'Field name and value are required.'
-          );
-        }
-
-        const {
-          error,
-        } = await supabase
-          .from(
-            'equipment_identifiers'
-          )
-          .insert({
-            equipment_id:
-              equipmentId,
-            field_name:
-              fieldName.trim(),
-            field_value:
-              fieldValue.trim(),
-            unit:
-              unit.trim() ||
-              null,
-            created_by:
-              userId,
-          });
-
-        if (error) {
-          throw error;
-        }
-
-        onDone();
-        return;
-      }
-
-      /* =================================================
-         SPARE PART
-      ================================================= */
-
-      if (
-        type === 'SPARE_PART'
-      ) {
-        if (!title.trim()) {
-          throw new Error(
-            'Part name is required.'
-          );
-        }
-
-        const {
-          data,
-          error,
-        } = await supabase
-          .from('spare_parts')
-          .insert({
-            equipment_id:
-              equipmentId,
-            part_name:
-              title.trim(),
-            part_number:
-              partNumber.trim() ||
-              null,
-            compatibility:
-              compatibility.trim() ||
-              null,
-            description:
-              description.trim() ||
-              null,
-            created_by:
-              userId,
-            approval_status:
-              'PENDING',
-          })
-          .select()
-          .single();
-
-        if (error) {
-          throw error;
-        }
-
-        await createSubmission({
-          entityId: data.id,
-          equipmentId,
-          submissionType:
-            'SPARE_PART',
-          title:
-            `New spare part: ${title.trim()}`,
-          description:
-            description.trim() ||
-            'New spare part submitted for approval.',
-          userId,
+      if (type === 'TECHNICAL_SPECIFICATION') {
+        if (!fieldName.trim()) throw new Error('Field name is required.');
+        const { error } = await supabase.from('equipment_identifiers').insert({
+          equipment_id: equipmentId,
+          field_name: fieldName.trim(),
+          field_value: fieldValue.trim(),
+          unit: unit.trim(),
+          created_by: userId,
         });
-
-        onDone();
-        return;
-      }
-
-      /* =================================================
-         REPAIR CASE
-      ================================================= */
-
-      if (
-        type === 'REPAIR_CASE'
-      ) {
-        if (
-          !problemTitle.trim()
-        ) {
-          throw new Error(
-            'Problem title is required.'
-          );
-        }
-
-        const {
-          data,
-          error,
-        } = await supabase
-          .from(
-            'repair_cases'
-          )
-          .insert({
-            equipment_id:
-              equipmentId,
-            problem_title:
-              problemTitle.trim(),
-            reported_fault:
-              reportedFault.trim() ||
-              null,
-            root_cause:
-              rootCause.trim() ||
-              null,
-            corrective_action:
-              correctiveAction.trim() ||
-              null,
-            final_result:
-              finalResult.trim() ||
-              null,
-            created_by:
-              userId,
-            approval_status:
-              'PENDING',
-          })
-          .select()
-          .single();
-
-        if (error) {
-          throw error;
-        }
-
-        await createSubmission({
-          entityId: data.id,
-          equipmentId,
-          submissionType:
-            'REPAIR_CASE',
-          title:
-            `New repair case: ${problemTitle.trim()}`,
-          description:
-            reportedFault.trim() ||
-            'New repair case submitted for approval.',
-          userId,
+        if (error) throw error;
+      } else if (type === 'SPARE_PART') {
+        if (!partName.trim()) throw new Error('Part name is required.');
+        const { error } = await supabase.from('spare_parts').insert({
+          equipment_id: equipmentId,
+          part_name: partName.trim(),
+          part_number: partNumber.trim(),
+          compatibility: compatibility.trim(),
+          description: description.trim(),
+          approval_status: 'PENDING',
+          created_by: userId,
         });
-
-        onDone();
-        return;
+        if (error) throw error;
+      } else if (type === 'REPAIR_CASE') {
+        if (!problemTitle.trim()) throw new Error('Problem title is required.');
+        const { error } = await supabase.from('repair_cases').insert({
+          equipment_id: equipmentId,
+          problem_title: problemTitle.trim(),
+          reported_fault: reportedFault.trim(),
+          root_cause: rootCause.trim(),
+          corrective_action: correctiveAction.trim(),
+          final_result: finalResult.trim(),
+          approval_status: 'PENDING',
+          created_by: userId,
+        });
+        if (error) throw error;
+      } else if (['USER_MANUAL', 'SERVICE_MANUAL', 'TROUBLESHOOTING_GUIDE', 'DOCUMENT', 'SCHEMATIC'].includes(type)) {
+        const { error } = await supabase.from('manuals').insert({
+          equipment_id: equipmentId,
+          title: title.trim() || type.replace('_', ' '),
+          document_type: type.replace('_', ' '),
+          description: description.trim(),
+          approval_status: 'PENDING',
+          created_by: userId,
+        });
+        if (error) throw error;
+      } else if (['PHOTO', 'VIDEO'].includes(type)) {
+        const { error } = await supabase.from('media').insert({
+          equipment_id: equipmentId,
+          title: title.trim() || (type === 'PHOTO' ? 'Photo' : 'Video'),
+          media_type: type,
+          caption: description.trim(),
+          approval_status: 'PENDING',
+          created_by: userId,
+        });
+        if (error) throw error;
       }
 
-      /* =================================================
-         FILE UPLOADS
-      ================================================= */
-
-      if (isFileType) {
-        if (!files.length) {
-          throw new Error(
-            'Please select at least one file.'
-          );
-        }
-
-        for (
-          const file of files
-        ) {
-          if (
-            file.size >
-            100 *
-              1024 *
-              1024
-          ) {
-            throw new Error(
-              `${file.name} exceeds 100 MB.`
-            );
-          }
-
-          const safeName =
-            file.name.replace(
-              /[^a-zA-Z0-9._-]/g,
-              '_'
-            );
-
-          const folder =
-            `${equipmentId}/${crypto.randomUUID()}`;
-
-          let bucket =
-            'photos';
-
-          if (
-            type === 'VIDEO'
-          ) {
-            bucket =
-              'videos';
-          }
-
-          if (
-            [
-              'USER_MANUAL',
-              'SERVICE_MANUAL',
-              'TROUBLESHOOTING_GUIDE',
-              'DOCUMENT',
-              'SCHEMATIC',
-            ].includes(type)
-          ) {
-            bucket =
-              'manuals';
-          }
-
-          const storagePath =
-            `${folder}-${safeName}`;
-
-          const {
-            error:
-              uploadError,
-          } =
-            await supabase.storage
-              .from(bucket)
-              .upload(
-                storagePath,
-                file,
-                {
-                  cacheControl:
-                    '3600',
-                  upsert:
-                    false,
-                }
-              );
-
-          if (uploadError) {
-            throw uploadError;
-          }
-
-          /* =============================================
-             MANUALS
-          ============================================= */
-
-          if (
-            [
-              'USER_MANUAL',
-              'SERVICE_MANUAL',
-              'TROUBLESHOOTING_GUIDE',
-              'DOCUMENT',
-              'SCHEMATIC',
-            ].includes(type)
-          ) {
-            const documentType =
-              getDocumentType(
-                type
-              );
-
-            const {
-              data,
-              error,
-            } =
-              await supabase
-                .from('manuals')
-                .insert({
-                  equipment_id:
-                    equipmentId,
-                  title:
-                    title.trim() ||
-                    file.name,
-                  document_type:
-                    documentType,
-                  file_name:
-                    file.name,
-                  storage_path:
-                    storagePath,
-                  mime_type:
-                    file.type ||
-                    null,
-                  file_size:
-                    file.size,
-                  description:
-                    description.trim() ||
-                    null,
-                  created_by:
-                    userId,
-                  approval_status:
-                    'PENDING',
-                })
-                .select()
-                .single();
-
-            if (error) {
-              throw error;
-            }
-
-            const submissionType: SubmissionType =
-              type ===
-              'TROUBLESHOOTING_GUIDE'
-                ? 'TROUBLESHOOTING'
-                : 'MANUAL';
-
-            await createSubmission({
-              entityId:
-                data.id,
-              equipmentId,
-              submissionType,
-              title:
-                `New ${documentType}: ${
-                  title.trim() ||
-                  file.name
-                }`,
-              description:
-                description.trim() ||
-                `New ${documentType} submitted for approval.`,
-              userId,
-            });
-          }
-
-          /* =============================================
-             PHOTO / VIDEO
-          ============================================= */
-
-          if (
-            type === 'PHOTO' ||
-            type === 'VIDEO'
-          ) {
-            const {
-              data,
-              error,
-            } =
-              await supabase
-                .from('media')
-                .insert({
-                  equipment_id:
-                    equipmentId,
-                  media_type:
-                    type === 'PHOTO'
-                      ? 'PHOTO'
-                      : 'VIDEO',
-                  category:
-                    type === 'PHOTO'
-                      ? 'Equipment Photo'
-                      : 'Equipment Video',
-                  title:
-                    title.trim() ||
-                    file.name,
-                  file_name:
-                    file.name,
-                  storage_path:
-                    storagePath,
-                  mime_type:
-                    file.type ||
-                    null,
-                  file_size:
-                    file.size,
-                  caption:
-                    description.trim() ||
-                    null,
-                  created_by:
-                    userId,
-                  approval_status:
-                    'PENDING',
-                })
-                .select()
-                .single();
-
-            if (error) {
-              throw error;
-            }
-
-            await createSubmission({
-              entityId:
-                data.id,
-              equipmentId,
-              submissionType:
-                type ===
-                'PHOTO'
-                  ? 'PHOTO'
-                  : 'VIDEO',
-              title:
-                `New ${
-                  type ===
-                  'PHOTO'
-                    ? 'photo'
-                    : 'video'
-                }: ${
-                  title.trim() ||
-                  file.name
-                }`,
-              description:
-                description.trim() ||
-                'New media submitted for approval.',
-              userId,
-            });
-          }
-        }
-
-        onDone();
-        return;
-      }
-    } catch (
-      error: any
-    ) {
-      console.error(
-        error
-      );
-
-      setError(
-        error?.message ||
-          'Unable to add content.'
-      );
+      await onDone();
+    } catch (err: any) {
+      setFormError(err?.message || 'Failed to submit content.');
     } finally {
-      setBusy(false);
+      setLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden">
-        {/* HEADER */}
-
-        <div className="flex items-center justify-between border-b p-5">
-          <div>
-            <h2 className="text-lg font-semibold">
-              Add{' '}
-              {
-                typeTitle[
-                  type
-                ]
-              }
-            </h2>
-
-            <p className="text-xs text-slate-500 mt-1">
-              New content will
-              be submitted for
-              approval.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            className="icon-btn"
-            onClick={
-              onClose
-            }
-            disabled={busy}
-          >
-            <X size={19} />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between border-b pb-3">
+          <h3 className="text-lg font-bold">Add {type.replace('_', ' ')}</h3>
+          <button type="button" className="text-slate-400 hover:text-slate-600" onClick={onClose}>
+            <X size={20} />
           </button>
         </div>
 
-        {/* FORM */}
+        {formError && (
+          <div className="rounded-lg bg-red-50 p-3 text-xs text-red-600 border border-red-200">
+            {formError}
+          </div>
+        )}
 
-        <form
-          onSubmit={submit}
-          className="overflow-y-auto p-5 space-y-5 max-h-[75vh]"
-        >
-          {error && (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              {error}
-            </div>
-          )}
-
-          {/* TECHNICAL */}
-
-          {type ===
-            'TECHNICAL_SPECIFICATION' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field
-                label="Specification name"
-                value={
-                  fieldName
-                }
-                onChange={
-                  setFieldName
-                }
-                placeholder="e.g. Maximum pressure"
-              />
-
-              <Field
-                label="Value"
-                value={
-                  fieldValue
-                }
-                onChange={
-                  setFieldValue
-                }
-                placeholder="e.g. 2.5"
-              />
-
-              <Field
-                label="Unit"
-                value={unit}
-                onChange={
-                  setUnit
-                }
-                placeholder="e.g. bar"
-              />
-            </div>
-          )}
-
-          {/* SPARE PART */}
-
-          {type ===
-            'SPARE_PART' && (
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {type === 'TECHNICAL_SPECIFICATION' && (
             <>
-              <Field
-                label="Part name"
-                value={
-                  title
-                }
-                onChange={
-                  setTitle
-                }
-                placeholder="e.g. Door gasket"
-              />
-
-              <Field
-                label="Part number"
-                value={
-                  partNumber
-                }
-                onChange={
-                  setPartNumber
-                }
-                placeholder="Optional"
-              />
-
-              <Field
-                label="Compatibility"
-                value={
-                  compatibility
-                }
-                onChange={
-                  setCompatibility
-                }
-                placeholder="Compatible model(s)"
-              />
-
-              <TextArea
-                label="Description"
-                value={
-                  description
-                }
-                onChange={
-                  setDescription
-                }
-                placeholder="Part description..."
-              />
-            </>
-          )}
-
-          {/* REPAIR */}
-
-          {type ===
-            'REPAIR_CASE' && (
-            <>
-              <Field
-                label="Problem title"
-                value={
-                  problemTitle
-                }
-                onChange={
-                  setProblemTitle
-                }
-                placeholder="e.g. Cuff pressure error"
-              />
-
-              <TextArea
-                label="Reported fault"
-                value={
-                  reportedFault
-                }
-                onChange={
-                  setReportedFault
-                }
-                placeholder="What was reported?"
-              />
-
-              <TextArea
-                label="Root cause"
-                value={
-                  rootCause
-                }
-                onChange={
-                  setRootCause
-                }
-                placeholder="What caused the problem?"
-              />
-
-              <TextArea
-                label="Corrective action"
-                value={
-                  correctiveAction
-                }
-                onChange={
-                  setCorrectiveAction
-                }
-                placeholder="What was repaired or replaced?"
-              />
-
-              <TextArea
-                label="Final result"
-                value={
-                  finalResult
-                }
-                onChange={
-                  setFinalResult
-                }
-                placeholder="Testing and final result..."
-              />
-            </>
-          )}
-
-          {/* FILE */}
-
-          {isFileType && (
-            <>
-              <Field
-                label="Title"
-                value={title}
-                onChange={
-                  setTitle
-                }
-                placeholder="Optional — defaults to filename"
-              />
-
-              <TextArea
-                label="Description / Caption"
-                value={
-                  description
-                }
-                onChange={
-                  setDescription
-                }
-                placeholder="Optional description..."
-              />
-
               <div>
-                <label className="block text-xs font-medium mb-1.5 text-slate-700">
-                  Files
-                </label>
-
-                <label className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-8 cursor-pointer hover:bg-slate-100 transition">
-                  <Upload
-                    size={30}
-                    className="text-slate-400 mb-3"
-                  />
-
-                  <div className="font-medium text-sm">
-                    Click to
-                    select files
-                  </div>
-
-                  <div className="text-xs text-slate-500 mt-1">
-                    Multiple files
-                    are supported
-                  </div>
-
-                  <input
-                    type="file"
-                    multiple
-                    className="hidden"
-                    accept={
-                      type ===
-                      'PHOTO'
-                        ? 'image/*'
-                        : type ===
-                          'VIDEO'
-                        ? 'video/*'
-                        : undefined
-                    }
-                    onChange={(
-                      event
-                    ) =>
-                      setFiles(
-                        Array.from(
-                          event
-                            .target
-                            .files ||
-                            []
-                        )
-                      )
-                    }
-                  />
-                </label>
-
-                {files.length >
-                  0 && (
-                  <div className="mt-3 space-y-2">
-                    {files.map(
-                      (
-                        file,
-                        index
-                      ) => (
-                        <div
-                          key={`${file.name}-${index}`}
-                          className="flex items-center justify-between rounded-lg border bg-white p-3"
-                        >
-                          <div className="min-w-0">
-                            <div className="text-sm font-medium truncate">
-                              {
-                                file.name
-                              }
-                            </div>
-
-                            <div className="text-xs text-slate-400">
-                              {formatFileSize(
-                                file.size
-                              )}
-                            </div>
-                          </div>
-
-                          <button
-                            type="button"
-                            className="text-slate-400 hover:text-red-600"
-                            onClick={() =>
-                              setFiles(
-                                files.filter(
-                                  (
-                                    _,
-                                    i
-                                  ) =>
-                                    i !==
-                                    index
-                                )
-                              )
-                            }
-                          >
-                            <X
-                              size={
-                                16
-                              }
-                            />
-                          </button>
-                        </div>
-                      )
-                    )}
-                  </div>
-                )}
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Specification Name *</label>
+                <input
+                  type="text"
+                  value={fieldName}
+                  onChange={(e) => setFieldName(e.target.value)}
+                  placeholder="e.g. Operating Voltage"
+                  className="w-full rounded-lg border p-2 text-sm outline-none"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Value</label>
+                <input
+                  type="text"
+                  value={fieldValue}
+                  onChange={(e) => setFieldValue(e.target.value)}
+                  placeholder="e.g. 220"
+                  className="w-full rounded-lg border p-2 text-sm outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Unit</label>
+                <input
+                  type="text"
+                  value={unit}
+                  onChange={(e) => setUnit(e.target.value)}
+                  placeholder="e.g. V AC"
+                  className="w-full rounded-lg border p-2 text-sm outline-none"
+                />
               </div>
             </>
           )}
 
-          {/* ACTIONS */}
+          {type === 'SPARE_PART' && (
+            <>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Part Name *</label>
+                <input
+                  type="text"
+                  value={partName}
+                  onChange={(e) => setPartName(e.target.value)}
+                  placeholder="e.g. Power Supply Board"
+                  className="w-full rounded-lg border p-2 text-sm outline-none"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Part Number</label>
+                <input
+                  type="text"
+                  value={partNumber}
+                  onChange={(e) => setPartNumber(e.target.value)}
+                  placeholder="e.g. PN-99201"
+                  className="w-full rounded-lg border p-2 text-sm outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Compatibility</label>
+                <input
+                  type="text"
+                  value={compatibility}
+                  onChange={(e) => setCompatibility(e.target.value)}
+                  placeholder="e.g. Series A & B"
+                  className="w-full rounded-lg border p-2 text-sm outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Description</label>
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  rows={3}
+                  className="w-full rounded-lg border p-2 text-sm outline-none"
+                />
+              </div>
+            </>
+          )}
 
-          <div className="flex justify-end gap-2 border-t pt-4">
+          {type === 'REPAIR_CASE' && (
+            <>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Problem Title *</label>
+                <input
+                  type="text"
+                  value={problemTitle}
+                  onChange={(e) => setProblemTitle(e.target.value)}
+                  placeholder="e.g. Display backlight flickering"
+                  className="w-full rounded-lg border p-2 text-sm outline-none"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Reported Fault</label>
+                <textarea
+                  value={reportedFault}
+                  onChange={(e) => setReportedFault(e.target.value)}
+                  rows={2}
+                  className="w-full rounded-lg border p-2 text-sm outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Root Cause</label>
+                <textarea
+                  value={rootCause}
+                  onChange={(e) => setRootCause(e.target.value)}
+                  rows={2}
+                  className="w-full rounded-lg border p-2 text-sm outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Corrective Action</label>
+                <textarea
+                  value={correctiveAction}
+                  onChange={(e) => setCorrectiveAction(e.target.value)}
+                  rows={2}
+                  className="w-full rounded-lg border p-2 text-sm outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Final Result</label>
+                <input
+                  type="text"
+                  value={finalResult}
+                  onChange={(e) => setFinalResult(e.target.value)}
+                  placeholder="e.g. System fully functional"
+                  className="w-full rounded-lg border p-2 text-sm outline-none"
+                />
+              </div>
+            </>
+          )}
+
+          {['USER_MANUAL', 'SERVICE_MANUAL', 'TROUBLESHOOTING_GUIDE', 'DOCUMENT', 'SCHEMATIC', 'PHOTO', 'VIDEO'].includes(type) && (
+            <>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Title</label>
+                <input
+                  type="text"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Enter title..."
+                  className="w-full rounded-lg border p-2 text-sm outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Description / Caption</label>
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  rows={3}
+                  className="w-full rounded-lg border p-2 text-sm outline-none"
+                />
+              </div>
+            </>
+          )}
+
+          <div className="flex justify-end gap-2 pt-2 border-t">
             <button
               type="button"
-              className="secondary"
-              onClick={
-                onClose
-              }
-              disabled={busy}
+              className="rounded-lg border px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
+              onClick={onClose}
+              disabled={loading}
             >
               Cancel
             </button>
-
             <button
               type="submit"
-              className="primary inline-flex items-center gap-2"
-              disabled={busy}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+              disabled={loading}
             >
-              {busy
-                ? 'Submitting…'
-                : 'Submit for Approval'}
+              {loading ? 'Submitting…' : 'Submit'}
             </button>
           </div>
         </form>
       </div>
     </div>
   );
-}
-
-/* =========================================================
-   CREATE SUBMISSION
-========================================================= */
-
-async function createSubmission({
-  entityId,
-  equipmentId,
-  submissionType,
-  title,
-  description,
-  userId,
-}: {
-  entityId: string;
-  equipmentId: string;
-  submissionType: SubmissionType;
-  title: string;
-  description: string;
-  userId: string;
-}) {
-  const {
-    error,
-  } = await supabase
-    .from('submissions')
-    .insert({
-      submission_type:
-        submissionType,
-      entity_id: entityId,
-      equipment_id:
-        equipmentId,
-      title,
-      description,
-      submitted_by: userId,
-      status: 'PENDING',
-    });
-
-  if (error) {
-    throw error;
-  }
-}
-
-/* =========================================================
-   DOCUMENT TYPE
-========================================================= */
-
-function getDocumentType(
-  type: ContentType
-) {
-  switch (type) {
-    case 'USER_MANUAL':
-      return 'User Manual';
-
-    case 'SERVICE_MANUAL':
-      return 'Service Manual';
-
-    case 'TROUBLESHOOTING_GUIDE':
-      return 'Troubleshooting Guide';
-
-    case 'SCHEMATIC':
-      return 'Schematic';
-
-    case 'DOCUMENT':
-    default:
-      return 'Document';
-  }
-}
-
-/* =========================================================
-   DOCUMENT TAB
-========================================================= */
-
-function DocumentTab({
-  title,
-  docs,
-  canAdd,
-  onAdd,
-}: {
-  title: string;
-  docs: any[];
-  canAdd: boolean;
-  onAdd: () => void;
-}) {
-  return (
-    <section>
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h2 className="text-xl font-semibold">
-            {title}
-          </h2>
-
-          <p className="text-sm text-slate-500">
-            Approved documents
-            associated with this
-            equipment.
-          </p>
-        </div>
-
-        {canAdd && (
-          <button
-            type="button"
-            className="primary inline-flex items-center gap-2"
-            onClick={onAdd}
-          >
-            <Plus size={16} />
-            Add
-          </button>
-        )}
-      </div>
-
-      {docs.length > 0 ? (
-        <div className="space-y-3">
-          {docs.map(
-            (doc) => (
-              <div
-                key={doc.id}
-                className="flex items-center justify-between gap-4 rounded-lg border p-4 bg-white"
-              >
-                <div className="min-w-0">
-                  <div className="font-semibold">
-                    {doc.title}
-                  </div>
-
-                  <div className="text-sm text-slate-500">
-                    {
-                      doc.document_type
-                    }
-                    {' • '}
-                    {doc.version ||
-                      'Version not specified'}
-                    {' • '}
-                    {formatDate(
-                      doc.created_at
-                    )}
-                  </div>
-
-                  {doc.file_name && (
-                    <div className="text-xs text-slate-400 mt-1 truncate">
-                      {
-                        doc.file_name
-                      }
-                    </div>
-                  )}
-                </div>
-
-                <button
-                  type="button"
-                  className="secondary shrink-0"
-                  onClick={async () => {
-                    try {
-                      const url =
-                        await signedUrl(
-                          'manuals',
-                          doc.storage_path
-                        );
-
-                      window.open(
-                        url,
-                        '_blank',
-                        'noopener,noreferrer'
-                      );
-                    } catch {
-                      alert(
-                        'Unable to create secure download link.'
-                      );
-                    }
-                  }}
-                >
-                  <FileText
-                    size={16}
-                  />
-                  Open
-                </button>
-              </div>
-            )
-          )}
-        </div>
-      ) : (
-        <EmptyState
-          text="No approved documents."
-        />
-      )}
-    </section>
-  );
-}
-
-/* =========================================================
-   MEDIA TAB
-========================================================= */
-
-function MediaTab({
-  title,
-  items,
-  canAdd,
-  onAdd,
-}: {
-  title: string;
-  items: any[];
-  canAdd: boolean;
-  onAdd: () => void;
-}) {
-  return (
-    <section>
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h2 className="text-xl font-semibold">
-            {title}
-          </h2>
-
-          <p className="text-sm text-slate-500">
-            Approved media associated
-            with this equipment.
-          </p>
-        </div>
-
-        {canAdd && (
-          <button
-            type="button"
-            className="primary inline-flex items-center gap-2"
-            onClick={onAdd}
-          >
-            <Plus size={16} />
-            Add
-          </button>
-        )}
-      </div>
-
-      {items.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {items.map(
-            (item) => (
-              <AttachmentCard
-                key={item.id}
-                media={item}
-              />
-            )
-          )}
-        </div>
-      ) : (
-        <EmptyState
-          text="No approved media."
-        />
-      )}
-    </section>
-  );
-}
-
-/* =========================================================
-   ATTACHMENT CARD
-========================================================= */
-
-function AttachmentCard({
-  media,
-}: {
-  media: any;
-}) {
-  const [url, setUrl] =
-    useState('');
-
-  const [loading, setLoading] =
-    useState(false);
-
-  const [error, setError] =
-    useState('');
-
-  const isVideo =
-    media.media_type ===
-      'VIDEO' ||
-    media.mime_type?.startsWith(
-      'video/'
-    );
-
-  const isImage =
-    media.media_type ===
-      'PHOTO' ||
-    media.mime_type?.startsWith(
-      'image/'
-    );
-
-  const isPdf =
-    media.mime_type ===
-      'application/pdf' ||
-    media.file_name
-      ?.toLowerCase()
-      .endsWith('.pdf');
-
-  const openFile =
-    async () => {
-      if (
-        !media.storage_path
-      ) {
-        setError(
-          'Storage path is missing.'
-        );
-        return;
-      }
-
-      setLoading(true);
-      setError('');
-
-      try {
-        let bucket =
-          'photos';
-
-        if (isVideo) {
-          bucket =
-            'videos';
-        }
-
-        const signed =
-          await signedUrl(
-            bucket,
-            media.storage_path
-          );
-
-        setUrl(signed);
-
-        window.open(
-          signed,
-          '_blank',
-          'noopener,noreferrer'
-        );
-      } catch (
-        error: any
-      ) {
-        setError(
-          error?.message ||
-            'Unable to open this attachment.'
-        );
-      } finally {
-        setLoading(false);
-      }
-    };
-
-  return (
-    <div className="rounded-xl border bg-white overflow-hidden">
-      {isImage && (
-        <button
-          type="button"
-          className="w-full h-56 bg-slate-100 flex items-center justify-center"
-          onClick={
-            openFile
-          }
-        >
-          {url ? (
-            <img
-              src={url}
-              alt={
-                media.title ||
-                media.file_name ||
-                'Image'
-              }
-              className="w-full h-56 object-contain"
-            />
-          ) : (
-            <div className="flex flex-col items-center gap-2">
-              <ImageIcon
-                size={40}
-              />
-
-              <span className="font-medium">
-                {loading
-                  ? 'Opening image…'
-                  : 'Open image'}
-              </span>
-            </div>
-          )}
-        </button>
-      )}
-
-      {isVideo && (
-        <div className="h-56 bg-slate-100 flex flex-col items-center justify-center gap-3">
-          <PlayCircle
-            size={48}
-          />
-
-          <button
-            type="button"
-            className="primary"
-            onClick={
-              openFile
-            }
-            disabled={loading}
-          >
-            {loading
-              ? 'Opening…'
-              : 'Open video'}
-          </button>
-        </div>
-      )}
-
-      {isPdf && (
-        <div className="h-40 bg-slate-50 flex flex-col items-center justify-center gap-3">
-          <FileText
-            size={40}
-          />
-
-          <button
-            type="button"
-            className="secondary"
-            onClick={
-              openFile
-            }
-            disabled={loading}
-          >
-            {loading
-              ? 'Opening…'
-              : 'Open PDF'}
-          </button>
-        </div>
-      )}
-
-      <div className="p-4">
-        <div className="font-semibold">
-          {media.title ||
-            media.file_name ||
-            'Attachment'}
-        </div>
-
-        <div className="text-sm text-slate-500 mt-1">
-          {media.category ||
-            media.media_type ||
-            'Attachment'}
-        </div>
-
-        {media.file_name && (
-          <div className="text-xs text-slate-400 mt-1 break-all">
-            {media.file_name}
-          </div>
-        )}
-
-        {media.caption && (
-          <div className="text-sm text-slate-600 mt-2">
-            {media.caption}
-          </div>
-        )}
-
-        {error && (
-          <div className="mt-3 text-sm text-red-600">
-            {error}
-          </div>
-        )}
-
-        {!isImage &&
-          !isVideo &&
-          !isPdf && (
-            <button
-              type="button"
-              className="secondary mt-3"
-              onClick={
-                openFile
-              }
-              disabled={
-                loading
-              }
-            >
-              {loading
-                ? 'Opening…'
-                : 'Open attachment'}
-            </button>
-          )}
-      </div>
-    </div>
-  );
-}
-
-/* =========================================================
-   INFO
-========================================================= */
-
-function Info({
-  label,
-  value,
-}: {
-  label: string;
-  value: any;
-}) {
-  return (
-    <div>
-      <div className="text-xs font-medium uppercase tracking-wide text-slate-400">
-        {label}
-      </div>
-
-      <div className="mt-1 whitespace-pre-wrap">
-        {value ||
-          'Not specified'}
-      </div>
-    </div>
-  );
-}
-
-/* =========================================================
-   EMPTY STATE
-========================================================= */
-
-function EmptyState({
-  text,
-}: {
-  text: string;
-}) {
-  return (
-    <div className="rounded-xl border border-dashed p-8 text-center text-slate-500">
-      {text}
-    </div>
-  );
-}
-
-/* =========================================================
-   FIELD
-========================================================= */
-
-function Field({
-  label,
-  value,
-  onChange,
-  placeholder,
-  type = 'text',
-}: {
-  label: string;
-  value: string;
-  onChange: (
-    value: string
-  ) => void;
-  placeholder?: string;
-  type?: string;
-}) {
-  return (
-    <div>
-      <label className="block text-xs font-medium mb-1.5 text-slate-700">
-        {label}
-      </label>
-
-      <input
-        type={type}
-        value={value}
-        placeholder={
-          placeholder
-        }
-        onChange={(event) =>
-          onChange(
-            event.target.value
-          )
-        }
-        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-400"
-      />
-    </div>
-  );
-}
-
-/* =========================================================
-   TEXT AREA
-========================================================= */
-
-function TextArea({
-  label,
-  value,
-  onChange,
-  placeholder,
-}: {
-  label: string;
-  value: string;
-  onChange: (
-    value: string
-  ) => void;
-  placeholder?: string;
-}) {
-  return (
-    <div>
-      <label className="block text-xs font-medium mb-1.5 text-slate-700">
-        {label}
-      </label>
-
-      <textarea
-        rows={4}
-        value={value}
-        placeholder={
-          placeholder
-        }
-        onChange={(event) =>
-          onChange(
-            event.target.value
-          )
-        }
-        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-400"
-      />
-    </div>
-  );
-}
-
-/* =========================================================
-   FILE SIZE
-========================================================= */
-
-function formatFileSize(
-  bytes: number
-) {
-  if (bytes === 0) {
-    return '0 Bytes';
-  }
-
-  const units = [
-    'Bytes',
-    'KB',
-    'MB',
-    'GB',
-  ];
-
-  const index = Math.floor(
-    Math.log(bytes) /
-      Math.log(1024)
-  );
-
-  return `${(
-    bytes /
-    Math.pow(
-      1024,
-      index
-    )
-  ).toFixed(1)} ${
-    units[index]
-  }`;
 }
