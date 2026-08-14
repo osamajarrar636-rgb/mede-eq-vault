@@ -6,7 +6,6 @@ import {
   Wrench,
   X,
   BookOpen,
-  Trash2,
 } from 'lucide-react';
 
 import { supabase } from '../lib/supabase';
@@ -39,10 +38,6 @@ export default function Equipment() {
   const [cat, setCat] = useState('All');
   const [loading, setLoading] = useState(true);
   const [show, setShow] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(
-    null
-  );
-  const [deleteError, setDeleteError] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -74,53 +69,6 @@ export default function Equipment() {
     }
 
     setLoading(false);
-  };
-
-  const handleDelete = async (equipment: any) => {
-    if (profile?.role !== 'ADMIN') {
-      return;
-    }
-
-    const equipmentName =
-      equipment.manufacturer ||
-      equipment.device_name ||
-      equipment.model ||
-      'this equipment';
-
-    const confirmed = window.confirm(
-      `Are you sure you want to delete "${equipmentName}"?\n\nThis action cannot be undone.`
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
-    setDeleteError('');
-    setDeletingId(equipment.id);
-
-    try {
-      const { error } = await supabase
-        .from('equipment')
-        .delete()
-        .eq('id', equipment.id);
-
-      if (error) {
-        throw error;
-      }
-
-      setItems((current) =>
-        current.filter((item) => item.id !== equipment.id)
-      );
-    } catch (error: any) {
-      console.error(error);
-
-      setDeleteError(
-        error?.message ||
-          'Unable to delete equipment. Please try again.'
-      );
-    } finally {
-      setDeletingId(null);
-    }
   };
 
   useEffect(() => {
@@ -180,30 +128,6 @@ export default function Equipment() {
       </div>
 
       {/* =====================================================
-          DELETE ERROR
-      ===================================================== */}
-
-      {deleteError && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <div className="font-medium">
-            Unable to delete equipment
-          </div>
-
-          <div className="mt-1">
-            {deleteError}
-          </div>
-
-          <button
-            type="button"
-            className="mt-2 text-xs font-medium text-red-700 underline"
-            onClick={() => setDeleteError('')}
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      {/* =====================================================
           FILTERS
       ===================================================== */}
 
@@ -259,109 +183,70 @@ export default function Equipment() {
       ) : items.length ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {items.map((e) => (
-            <div
-              className="group relative rounded-xl border bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+            <Link
+              className="group block rounded-xl border bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+              to={`/equipment/${e.id}`}
               key={e.id}
             >
-              {/* Delete - ADMIN ONLY */}
-              {profile?.role === 'ADMIN' && (
-                <button
-                  type="button"
-                  className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
-                  onClick={() => handleDelete(e)}
-                  disabled={deletingId === e.id}
-                  aria-label={`Delete ${
-                    e.manufacturer ||
-                    e.device_name ||
-                    e.model ||
-                    'equipment'
-                  }`}
-                  title="Delete equipment"
-                >
-                  {deletingId === e.id ? (
-                    <span className="text-xs font-medium">
-                      …
-                    </span>
-                  ) : (
-                    <Trash2 size={17} />
-                  )}
-                </button>
-              )}
+              {/* Category */}
+              <div className="truncate text-[11px] font-medium uppercase tracking-wide text-slate-400">
+                {e.category || 'Other'}
+              </div>
 
-              <Link
-                className="block"
-                to={`/equipment/${e.id}`}
-              >
-                {/* Category */}
-                <div
-                  className={`truncate text-[11px] font-medium uppercase tracking-wide text-slate-400 ${
-                    profile?.role === 'ADMIN'
-                      ? 'pr-10'
-                      : ''
-                  }`}
-                >
-                  {e.category || 'Other'}
+              {/* Main */}
+              <div className="mt-3 flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+                  <Wrench size={19} />
                 </div>
 
-                {/* Main */}
-                <div className="mt-3 flex items-start gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
-                    <Wrench size={19} />
+                <div className="min-w-0">
+                  <div className="truncate font-semibold text-slate-900">
+                    {e.manufacturer ||
+                      'Manufacturer not specified'}
                   </div>
 
-                  <div className="min-w-0">
-                    <div className="truncate font-semibold text-slate-900">
-                      {e.manufacturer ||
-                        'Manufacturer not specified'}
-                    </div>
+                  <div className="mt-0.5 truncate text-sm text-slate-700">
+                    {e.device_name ||
+                      'Device name not specified'}
+                  </div>
 
-                    <div className="mt-0.5 truncate text-sm text-slate-700">
-                      {e.device_name ||
-                        'Device name not specified'}
-                    </div>
-
-                    <div className="mt-1 truncate text-xs text-slate-500">
-                      {e.model ||
-                        'Model not specified'}
-                    </div>
+                  <div className="mt-1 truncate text-xs text-slate-500">
+                    {e.model || 'Model not specified'}
                   </div>
                 </div>
+              </div>
 
-                {/* Details */}
-                <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
-                  <div className="truncate text-xs text-slate-500">
-                    SN:{' '}
-                    {e.serial_number ||
-                      'Not specified'}
-                  </div>
-
-                  {e.year && (
-                    <div className="shrink-0 text-xs text-slate-400">
-                      {e.year}
-                    </div>
-                  )}
+              {/* Details */}
+              <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
+                <div className="truncate text-xs text-slate-500">
+                  SN:{' '}
+                  {e.serial_number || 'Not specified'}
                 </div>
 
-                {/* Status */}
-                {e.approval_status && (
-                  <div className="mt-3">
-                    <span
-                      className={`inline-flex rounded-full px-2 py-1 text-[11px] font-medium ${
-                        e.approval_status ===
-                        'APPROVED'
-                          ? 'bg-green-50 text-green-700'
-                          : e.approval_status ===
-                            'PENDING'
-                          ? 'bg-amber-50 text-amber-700'
-                          : 'bg-slate-100 text-slate-600'
-                      }`}
-                    >
-                      {e.approval_status}
-                    </span>
+                {e.year && (
+                  <div className="shrink-0 text-xs text-slate-400">
+                    {e.year}
                   </div>
                 )}
-              </Link>
-            </div>
+              </div>
+
+              {/* Status */}
+              {e.approval_status && (
+                <div className="mt-3">
+                  <span
+                    className={`inline-flex rounded-full px-2 py-1 text-[11px] font-medium ${
+                      e.approval_status === 'APPROVED'
+                        ? 'bg-green-50 text-green-700'
+                        : e.approval_status === 'PENDING'
+                        ? 'bg-amber-50 text-amber-700'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    {e.approval_status}
+                  </span>
+                </div>
+              )}
+            </Link>
           ))}
         </div>
       ) : (
@@ -554,10 +439,16 @@ function EquipmentForm({
   };
 
   return (
+    /*
+     * IMPORTANT:
+     * This wrapper is FIXED to the viewport.
+     * z-[100] keeps the modal above the sidebar.
+     */
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
       onClick={onClose}
     >
+      {/* Modal */}
       <div
         className="relative flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
@@ -594,7 +485,7 @@ function EquipmentForm({
 
         <form
           onSubmit={submit}
-          className="min-h-0 space-y-5 overflow-y-auto p-5"
+          className="min-h-0 overflow-y-auto p-5 space-y-5"
         >
           {/* Error */}
           {err && (
